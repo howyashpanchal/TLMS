@@ -1,22 +1,28 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs';
-import { prisma } from '@/lib/prisma';
+import { auth } from '@clerk/nextjs/server';
+import { db } from '@/lib/db';
 import { put } from '@vercel/blob';
 
 export async function GET() {
   try {
-    const { userId } = auth();
+    const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const documents = await prisma.document.findMany({
+    // Fixed: Use correct field name from your Prisma schema (uploadedById)
+    const documents = await db.document.findMany({
       where: {
-        userId
+        uploadedById: userId // Changed from userId to uploadedById
       },
       orderBy: {
         createdAt: 'desc'
+      },
+      // Include related data if needed
+      include: {
+        lease: true,
+        property: true
       }
     });
 
@@ -32,7 +38,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { userId } = auth();
+    const { userId } = await auth();
     
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -41,6 +47,8 @@ export async function POST(req: Request) {
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const category = formData.get('category') as string;
+    const leaseId = formData.get('leaseId') as string; // Add leaseId from form data
+    const propertyId = formData.get('propertyId') as string; // Add propertyId from form data
 
     if (!file) {
       return NextResponse.json(
@@ -50,10 +58,26 @@ export async function POST(req: Request) {
     }
 
     // Validate file type
-    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const allowedTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'image/jpeg',
+      'image/png'
+    ];
+    
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json(
-        { error: 'Invalid file type. Only PDF and Word documents are allowed.' }, 
+        { error: 'Invalid file type. Allowed types: PDF, Word, JPEG, PNG' }, 
+        { status: 400 }
+      );
+    }
+
+    // Validate file size (5MB limit)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      return NextResponse.json(
+        { error: 'File size exceeds 5MB limit' }, 
         { status: 400 }
       );
     }
@@ -63,14 +87,17 @@ export async function POST(req: Request) {
       access: 'public',
     });
 
-    const document = await prisma.document.create({
+    // Create document with proper field names from your Prisma schema
+    const document = await db.document.create({
       data: {
+        type: category || 'OTHER', // Match your schema's Document.type field
         name: file.name,
-        type: file.type.includes('pdf') ? 'PDF' : 'DOC',
-        size: file.size,
-        url: blob.url,
-        category: category || 'OTHER',
-        userId
+        fileUrl: blob.url, // Changed from url to fileUrl
+        uploadedById: userId, // Correct field name from your schema
+        leaseId: leaseId || null,
+        propertyId: propertyId || null,
+        // Add additional fields from your schema if needed
+        expiresAt: new Date(new Date().setFullYear(new Date().getFullYear() + 1)) // Example expiration
       }
     });
 

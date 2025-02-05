@@ -1,15 +1,41 @@
-// utils/auth.ts
-import jwt from 'jsonwebtoken';
+import { auth } from '@clerk/nextjs/server'; // Updated import path
 
-const JWT_SECRET = process.env.JWT_SECRET || 'niggaNiggaChaltaMereko';
-
-export function verifyToken(authHeader: string | null) {
-  if (!authHeader) return null;
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    return decoded as { id: number; email: string; role: string };
-  } catch (error) {
-    return error;
+type UserType = 'LANDLORD' | 'TENANT' | 'PROPERTY_MANAGER' | 'ADMIN';
+interface AuthData {
+  userId : string | null;
+  sessionClaims : {
+    metadata : {
+      userType? : UserType;
+    }
   }
 }
+
+export const getAuthData = async () : Promise<AuthData> => {
+  const {userId, sessionClaims} = await auth();
+  return {
+    userId,
+    sessionClaims : {
+      metadata : {
+        userType: sessionClaims?.metadata?.userType as UserType | undefined,
+      }
+    }
+  }
+}
+
+// Helper to get current user's role
+export const getCurrentRole = async (): Promise<UserType | undefined> => {
+  const { sessionClaims } = await getAuthData();
+  return sessionClaims?.metadata.userType;
+};
+
+// Role checking middleware helper
+export const checkRole =  async (requiredRole: UserType) : Promise<boolean> => {
+  const { sessionClaims } = await getAuthData();
+  return sessionClaims?.metadata.userType === requiredRole;
+};
+
+// User ID helper
+export const getCurrentUserId = async () : Promise<string | null> => {
+  const { userId } = await getAuthData();
+  return userId;
+};
